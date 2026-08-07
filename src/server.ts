@@ -4,7 +4,7 @@ import { applyQuery } from "./query.js";
 import { MockApiError, MockStore, cloneRecord, responseRecord } from "./store.js";
 import type { KintoneRecord, MockServerOptions } from "./types.js";
 
-interface RequestData {
+export interface MockRequest {
   method: string;
   path: string;
   params: Record<string, unknown>;
@@ -38,10 +38,14 @@ export async function createKintoneMockServer(options: MockServerOptions = {}): 
   };
 }
 
+export function invokeKintoneMockRequest(store: MockStore, request: MockRequest): unknown {
+  return route(store, { ...request, method: request.method.toUpperCase() });
+}
+
 async function dispatch(store: MockStore, request: IncomingMessage, response: ServerResponse): Promise<void> {
   try {
     const data = await requestData(request);
-    const result = route(store, data);
+    const result = invokeKintoneMockRequest(store, data);
     json(response, 200, result);
   } catch (error) {
     if (error instanceof MockApiError) {
@@ -52,7 +56,7 @@ async function dispatch(store: MockStore, request: IncomingMessage, response: Se
   }
 }
 
-function route(store: MockStore, request: RequestData): unknown {
+function route(store: MockStore, request: MockRequest): unknown {
   const path = normalizePath(request.path);
   if (path === "/k/v1/record.json") return recordRoute(store, request);
   if (path === "/k/v1/records.json") return recordsRoute(store, request);
@@ -62,7 +66,7 @@ function route(store: MockStore, request: RequestData): unknown {
   throw new MockApiError("MOCK_NOT_FOUND", `Unsupported endpoint: ${request.path}`, 404);
 }
 
-function recordRoute(store: MockStore, request: RequestData): unknown {
+function recordRoute(store: MockStore, request: MockRequest): unknown {
   const app = store.app(request.params.app);
   if (request.method === "GET") {
     const target = findRecord(app.records, request.params);
@@ -84,7 +88,7 @@ function recordRoute(store: MockStore, request: RequestData): unknown {
   throw methodNotAllowed(request);
 }
 
-function recordsRoute(store: MockStore, request: RequestData): unknown {
+function recordsRoute(store: MockStore, request: MockRequest): unknown {
   const app = store.app(request.params.app);
   if (request.method === "GET") {
     const all = app.records.map(responseRecord);
@@ -131,7 +135,7 @@ function recordsRoute(store: MockStore, request: RequestData): unknown {
   throw methodNotAllowed(request);
 }
 
-function cursorRoute(store: MockStore, request: RequestData): unknown {
+function cursorRoute(store: MockStore, request: MockRequest): unknown {
   if (request.method === "POST") {
     const app = store.app(request.params.app);
     const fields = stringArray(request.params.fields);
@@ -157,7 +161,7 @@ function cursorRoute(store: MockStore, request: RequestData): unknown {
   throw methodNotAllowed(request);
 }
 
-function fieldsRoute(store: MockStore, request: RequestData, preview: boolean): unknown {
+function fieldsRoute(store: MockStore, request: MockRequest, preview: boolean): unknown {
   const app = store.app(request.params.app);
   if (request.method === "GET") {
     const properties = preview ? app.previewFields : app.fields;
@@ -183,7 +187,7 @@ function fieldsRoute(store: MockStore, request: RequestData, preview: boolean): 
   throw methodNotAllowed(request);
 }
 
-async function requestData(request: IncomingMessage): Promise<RequestData> {
+async function requestData(request: IncomingMessage): Promise<MockRequest> {
   const url = new URL(request.url ?? "/", "http://localhost");
   const query: Record<string, unknown> = {};
   for (const [key, value] of url.searchParams) {
@@ -280,7 +284,7 @@ function truthy(value: unknown): boolean {
   return value === true || value === "true";
 }
 
-function methodNotAllowed(request: RequestData): MockApiError {
+function methodNotAllowed(request: MockRequest): MockApiError {
   return new MockApiError("MOCK_METHOD_NOT_ALLOWED", `${request.method} is not supported for ${request.path}.`, 405);
 }
 
