@@ -1,4 +1,4 @@
-export { createKintoneMockServer } from "./server.js";
+export { createKintoneMockServer, invokeKintoneMockRequest } from "./server.js";
 export { MockApiError, MockStore } from "./store.js";
-export type { KintoneMockServer } from "./server.js";
-export type { AppFixture, KintoneFieldProperty, KintoneFieldValue, KintoneRecord, MockFixture, MockServerOptions } from "./types.js";
+export type { KintoneMockServer, MockRequest } from "./server.js";
+export type { AppFixture, KintoneFieldProperty, KintoneFieldValue, KintoneRecord, KintoneUser, MockFixture, MockServerOptions } from "./types.js";

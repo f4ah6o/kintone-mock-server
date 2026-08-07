@@ -9,19 +9,12 @@ const command = args[0]?.startsWith("-") || !args[0] ? "serve" : args[0];
 
 try {
   const fixture = await loadFixture();
-  if (command === "serve") {
-    await serve(fixture);
-  } else {
-    read(fixture, command);
-  }
+  if (command === "serve") await serve(fixture);
+  else read(fixture, command);
 } catch (error) {
-  if (error instanceof MockApiError) {
-    console.error(JSON.stringify({ code: error.code, id: null, message: error.message }));
-    process.exitCode = 1;
-  } else {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
-  }
+  if (error instanceof MockApiError) console.error(JSON.stringify({ code: error.code, id: null, message: error.message }));
+  else console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
 }
 
 async function serve(fixture: MockFixture): Promise<void> {
@@ -29,11 +22,7 @@ async function serve(fixture: MockFixture): Promise<void> {
   const hostname = argument("--host") ?? "127.0.0.1";
   const mock = await createKintoneMockServer({ ...fixture, port, hostname });
   console.log(`kintone-mock-server listening on ${mock.url}`);
-  for (const signal of ["SIGINT", "SIGTERM"] as const) {
-    process.once(signal, () => {
-      void mock.close().then(() => process.exit(0));
-    });
-  }
+  for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => void mock.close().then(() => process.exit(0)));
 }
 
 function read(fixture: MockFixture, subcommand: string): void {
@@ -41,37 +30,50 @@ function read(fixture: MockFixture, subcommand: string): void {
   let path: string;
   let params: Record<string, unknown>;
 
-  if (subcommand === "record") {
+  if (subcommand === "app") {
+    path = "/k/v1/app.json";
+    params = { id: required("--id") };
+  } else if (subcommand === "apps") {
+    path = "/k/v1/apps.json";
+    params = {
+      ...(argument("--ids") ? { ids: csv("--ids") } : {}),
+      ...(argument("--codes") ? { codes: csv("--codes") } : {}),
+      ...(argument("--name") ? { name: argument("--name") } : {}),
+    };
+  } else if (subcommand === "record") {
     path = "/k/v1/record.json";
-    params = { app: required("--app"), id: required("--id") };
+    params = { app: required("--app"), ...(argument("--id") ? { id: argument("--id") } : {}) };
   } else if (subcommand === "records") {
     path = "/k/v1/records.json";
     params = {
       app: required("--app"),
       ...(argument("--query") ? { query: argument("--query") } : {}),
-      ...(argument("--fields") ? { fields: argument("--fields")?.split(",").filter(Boolean) } : {}),
+      ...(argument("--fields") ? { fields: csv("--fields") } : {}),
       ...(has("--total-count") ? { totalCount: true } : {}),
     };
-  } else if (subcommand === "fields") {
-    path = has("--preview") ? "/k/v1/preview/app/form/fields.json" : "/k/v1/app/form/fields.json";
-    params = { app: required("--app") };
+  } else if (["fields", "settings", "layout", "views"].includes(subcommand)) {
+    const app = required("--app");
+    const preview = has("--preview") ? "/preview" : "";
+    const suffix = subcommand === "fields" ? "/app/form/fields.json" : subcommand === "layout" ? "/app/form/layout.json" : `/app/${subcommand}.json`;
+    path = `/k/v1${preview}${suffix}`;
+    params = { app };
   } else if (subcommand === "get") {
     path = required("--path");
-    params = {
-      ...jsonArgument("--params"),
-      ...(argument("--app") ? { app: argument("--app") } : {}),
-    };
+    params = jsonArgument("--params");
   } else {
     throw new Error(`Unknown command: ${subcommand}`);
   }
 
-  const result = invokeKintoneMockRequest(store, { method: "GET", path, params });
-  console.log(JSON.stringify(result, null, has("--pretty") ? 2 : undefined));
+  console.log(JSON.stringify(invokeKintoneMockRequest(store, { method: "GET", path, params }), null, has("--pretty") ? 2 : undefined));
 }
 
 async function loadFixture(): Promise<MockFixture> {
   const fixturePath = argument("--fixture");
   return fixturePath ? (JSON.parse(await readFile(fixturePath, "utf8")) as MockFixture) : {};
+}
+
+function csv(name: string): string[] {
+  return (argument(name) ?? "").split(",").filter(Boolean);
 }
 
 function jsonArgument(name: string): Record<string, unknown> {

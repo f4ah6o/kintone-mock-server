@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { once } from "node:events";
 import { applyQuery } from "./query.js";
-import { MockApiError, MockStore, cloneRecord, responseRecord } from "./store.js";
+import { MockApiError, MockStore, appInfo, cloneRecord, responseRecord } from "./store.js";
 import type { KintoneRecord, MockServerOptions } from "./types.js";
 
 export interface MockRequest {
@@ -19,9 +19,7 @@ export interface KintoneMockServer {
 
 export async function createKintoneMockServer(options: MockServerOptions = {}): Promise<KintoneMockServer> {
   const store = new MockStore(options.apps ? { apps: options.apps } : {});
-  const server = createServer((request, response) => {
-    void dispatch(store, request, response);
-  });
+  const server = createServer((request, response) => void dispatch(store, request, response));
   server.listen(options.port ?? 0, options.hostname ?? "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
@@ -44,9 +42,7 @@ export function invokeKintoneMockRequest(store: MockStore, request: MockRequest)
 
 async function dispatch(store: MockStore, request: IncomingMessage, response: ServerResponse): Promise<void> {
   try {
-    const data = await requestData(request);
-    const result = invokeKintoneMockRequest(store, data);
-    json(response, 200, result);
+    json(response, 200, invokeKintoneMockRequest(store, await requestData(request)));
   } catch (error) {
     if (error instanceof MockApiError) {
       json(response, error.status, { code: error.code, id: null, message: error.message });
@@ -58,6 +54,14 @@ async function dispatch(store: MockStore, request: IncomingMessage, response: Se
 
 function route(store: MockStore, request: MockRequest): unknown {
   const path = normalizePath(request.path);
+  if (path === "/k/v1/app.json") return appRoute(store, request);
+  if (path === "/k/v1/apps.json") return appsRoute(store, request);
+  if (path === "/k/v1/app/settings.json") return appSettingsRoute(store, request, false);
+  if (path === "/k/v1/preview/app/settings.json") return appSettingsRoute(store, request, true);
+  if (path === "/k/v1/app/form/layout.json") return appLayoutRoute(store, request, false);
+  if (path === "/k/v1/preview/app/form/layout.json") return appLayoutRoute(store, request, true);
+  if (path === "/k/v1/app/views.json") return appViewsRoute(store, request, false);
+  if (path === "/k/v1/preview/app/views.json") return appViewsRoute(store, request, true);
   if (path === "/k/v1/record.json") return recordRoute(store, request);
   if (path === "/k/v1/records.json") return recordsRoute(store, request);
   if (path === "/k/v1/records/cursor.json") return cursorRoute(store, request);
@@ -66,12 +70,49 @@ function route(store: MockStore, request: MockRequest): unknown {
   throw new MockApiError("MOCK_NOT_FOUND", `Unsupported endpoint: ${request.path}`, 404);
 }
 
+function appRoute(store: MockStore, request: MockRequest): unknown {
+  if (request.method !== "GET") throw methodNotAllowed(request);
+  return appInfo(store.app(request.params.id));
+}
+
+function appsRoute(store: MockStore, request: MockRequest): unknown {
+  if (request.method !== "GET") throw methodNotAllowed(request);
+  const ids = stringArray(request.params.ids);
+  const codes = stringArray(request.params.codes);
+  const name = request.params.name == null ? undefined : String(request.params.name);
+  const offset = Math.max(Number(request.params.offset ?? 0), 0);
+  const limit = Math.min(Math.max(Number(request.params.limit ?? 100), 1), 100);
+  const apps = [...store.apps.values()]
+    .filter((app) => ids.length === 0 || ids.includes(app.id))
+    .filter((app) => codes.length === 0 || codes.includes(app.code))
+    .filter((app) => !name || app.name.includes(name))
+    .slice(offset, offset + limit)
+    .map(appInfo);
+  return { apps };
+}
+
+function appSettingsRoute(store: MockStore, request: MockRequest, preview: boolean): unknown {
+  if (request.method !== "GET") throw methodNotAllowed(request);
+  const app = store.app(request.params.app);
+  const settings = preview ? app.previewSettings : app.settings;
+  return { ...structuredClone(settings), revision: String(app.revision) };
+}
+
+function appLayoutRoute(store: MockStore, request: MockRequest, preview: boolean): unknown {
+  if (request.method !== "GET") throw methodNotAllowed(request);
+  const app = store.app(request.params.app);
+  return { layout: structuredClone(preview ? app.previewLayout : app.layout), revision: String(app.revision) };
+}
+
+function appViewsRoute(store: MockStore, request: MockRequest, preview: boolean): unknown {
+  if (request.method !== "GET") throw methodNotAllowed(request);
+  const app = store.app(request.params.app);
+  return { views: structuredClone(preview ? app.previewViews : app.views), revision: String(app.revision) };
+}
+
 function recordRoute(store: MockStore, request: MockRequest): unknown {
   const app = store.app(request.params.app);
-  if (request.method === "GET") {
-    const target = findRecord(app.records, request.params);
-    return { record: responseRecord(target) };
-  }
+  if (request.method === "GET") return { record: responseRecord(findRecord(app.records, request.params)) };
   if (request.method === "POST") {
     const id = String(app.nextRecordId++);
     const record = asRecord(request.params.record ?? {});
@@ -92,8 +133,7 @@ function recordsRoute(store: MockStore, request: MockRequest): unknown {
   const app = store.app(request.params.app);
   if (request.method === "GET") {
     const all = app.records.map(responseRecord);
-    const query = String(request.params.query ?? "");
-    const filtered = applyQuery(all, query).map((record) => selectFields(record, stringArray(request.params.fields)));
+    const filtered = applyQuery(all, String(request.params.query ?? "")).map((record) => selectFields(record, stringArray(request.params.fields)));
     return { records: filtered, totalCount: truthy(request.params.totalCount) ? String(all.length) : null };
   }
   if (request.method === "POST") {
@@ -109,24 +149,22 @@ function recordsRoute(store: MockStore, request: MockRequest): unknown {
     return { ids, revisions };
   }
   if (request.method === "PUT") {
-    const updates = objectArray(request.params.records);
-    const revisions = updates.map((update) => {
+    const records = objectArray(request.params.records).map((update) => {
       const target = findRecord(app.records, update);
       assertRevision(target.revision, update.revision);
       mergeRecord(target.record, asRecord(update.record ?? {}));
       target.revision += 1;
       return { id: target.id, revision: String(target.revision) };
     });
-    return { records: revisions };
+    return { records };
   }
   if (request.method === "DELETE") {
     const ids = stringArray(request.params.ids);
     const revisions = request.params.revisions == null ? [] : stringArray(request.params.revisions);
     ids.forEach((id, index) => {
       const position = app.records.findIndex((record) => record.id === id);
-      if (position < 0) throw new MockApiError("GAIA_RE20", `Record ${id} was not found.`, 404);
       const target = app.records[position];
-      if (!target) throw new MockApiError("GAIA_RE20", `Record ${id} was not found.`, 404);
+      if (position < 0 || !target) throw new MockApiError("GAIA_RE20", `Record ${id} was not found.`, 404);
       assertRevision(target.revision, revisions[index]);
       app.records.splice(position, 1);
     });
@@ -148,11 +186,11 @@ function cursorRoute(store: MockStore, request: MockRequest): unknown {
   const cursor = store.cursors.get(id);
   if (!cursor) throw new MockApiError("GAIA_CU01", `Cursor ${id} was not found.`, 404);
   if (request.method === "GET") {
-    const chunk = cursor.records.slice(cursor.index, cursor.index + cursor.size).map((record) => selectFields(record, cursor.fields ?? []));
-    cursor.index += chunk.length;
+    const records = cursor.records.slice(cursor.index, cursor.index + cursor.size).map((record) => selectFields(record, cursor.fields ?? []));
+    cursor.index += records.length;
     const next = cursor.index < cursor.records.length;
     if (!next) store.cursors.delete(id);
-    return { records: chunk, next };
+    return { records, next };
   }
   if (request.method === "DELETE") {
     store.cursors.delete(id);
@@ -163,10 +201,7 @@ function cursorRoute(store: MockStore, request: MockRequest): unknown {
 
 function fieldsRoute(store: MockStore, request: MockRequest, preview: boolean): unknown {
   const app = store.app(request.params.app);
-  if (request.method === "GET") {
-    const properties = preview ? app.previewFields : app.fields;
-    return { properties: structuredClone(properties), revision: String(app.revision) };
-  }
+  if (request.method === "GET") return { properties: structuredClone(preview ? app.previewFields : app.fields), revision: String(app.revision) };
   if (!preview) throw methodNotAllowed(request);
   assertRevision(app.revision, request.params.revision);
   if (request.method === "POST" || request.method === "PUT") {
@@ -198,8 +233,7 @@ async function requestData(request: IncomingMessage): Promise<MockRequest> {
       values[Number(arrayMatch[2])] = value;
     } else query[key] = value;
   }
-  const body = await jsonBody(request);
-  return { method: (request.method ?? "GET").toUpperCase(), path: url.pathname, params: { ...query, ...body } };
+  return { method: (request.method ?? "GET").toUpperCase(), path: url.pathname, params: { ...query, ...(await jsonBody(request)) } };
 }
 
 async function jsonBody(request: IncomingMessage): Promise<Record<string, unknown>> {
@@ -208,8 +242,7 @@ async function jsonBody(request: IncomingMessage): Promise<Record<string, unknow
   if (chunks.length === 0) return {};
   const text = Buffer.concat(chunks).toString("utf8").trim();
   if (!text) return {};
-  const parsed: unknown = JSON.parse(text);
-  return asObject(parsed);
+  return asObject(JSON.parse(text) as unknown);
 }
 
 function normalizePath(path: string): string {
@@ -272,12 +305,7 @@ function asObject(value: unknown): Record<string, unknown> {
 
 function asFieldProperty(value: unknown, fallbackCode: string) {
   const property = asObject(value);
-  return {
-    ...property,
-    type: String(property.type ?? "SINGLE_LINE_TEXT"),
-    code: String(property.code ?? fallbackCode),
-    label: String(property.label ?? property.code ?? fallbackCode),
-  };
+  return { ...property, type: String(property.type ?? "SINGLE_LINE_TEXT"), code: String(property.code ?? fallbackCode), label: String(property.label ?? property.code ?? fallbackCode) };
 }
 
 function truthy(value: unknown): boolean {

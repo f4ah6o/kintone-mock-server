@@ -1,4 +1,4 @@
-import type { AppFixture, KintoneFieldProperty, KintoneRecord, MockFixture } from "./types.js";
+import type { AppFixture, KintoneFieldProperty, KintoneRecord, KintoneUser, MockFixture } from "./types.js";
 
 interface StoredRecord {
   id: string;
@@ -6,11 +6,26 @@ interface StoredRecord {
   record: KintoneRecord;
 }
 
-interface StoredApp {
+export interface StoredApp {
   id: string;
+  code: string;
+  name: string;
+  description: string;
+  spaceId: string | null;
+  threadId: string | null;
+  createdAt: string;
+  creator: KintoneUser;
+  modifiedAt: string;
+  modifier: KintoneUser;
   revision: number;
+  settings: Record<string, unknown>;
+  previewSettings: Record<string, unknown>;
   fields: Record<string, KintoneFieldProperty>;
   previewFields: Record<string, KintoneFieldProperty>;
+  layout: unknown[];
+  previewLayout: unknown[];
+  views: Record<string, unknown>;
+  previewViews: Record<string, unknown>;
   records: StoredRecord[];
   nextRecordId: number;
 }
@@ -22,6 +37,9 @@ export interface CursorState {
   index: number;
   size: number;
 }
+
+const DEFAULT_USER = { code: "mock-user", name: "Mock User" };
+const DEFAULT_DATE = "1970-01-01T00:00:00.000Z";
 
 export class MockStore {
   readonly apps = new Map<string, StoredApp>();
@@ -45,11 +63,27 @@ export class MockStore {
       };
     });
     const maxId = records.reduce((max, record) => Math.max(max, Number(record.id) || 0), 0);
+    const fields = structuredClone(fixture.fields ?? {});
     this.apps.set(id, {
       id,
+      code: fixture.code ?? "",
+      name: fixture.name ?? `App ${id}`,
+      description: fixture.description ?? "",
+      spaceId: fixture.spaceId ?? null,
+      threadId: fixture.threadId ?? null,
+      createdAt: fixture.createdAt ?? DEFAULT_DATE,
+      creator: structuredClone(fixture.creator ?? DEFAULT_USER),
+      modifiedAt: fixture.modifiedAt ?? DEFAULT_DATE,
+      modifier: structuredClone(fixture.modifier ?? fixture.creator ?? DEFAULT_USER),
       revision: 1,
-      fields: structuredClone(fixture.fields ?? {}),
-      previewFields: structuredClone(fixture.fields ?? {}),
+      settings: structuredClone(fixture.settings ?? {}),
+      previewSettings: structuredClone(fixture.previewSettings ?? fixture.settings ?? {}),
+      fields,
+      previewFields: structuredClone(fixture.previewFields ?? fields),
+      layout: structuredClone(fixture.layout ?? []),
+      previewLayout: structuredClone(fixture.previewLayout ?? fixture.layout ?? []),
+      views: structuredClone(fixture.views ?? {}),
+      previewViews: structuredClone(fixture.previewViews ?? fixture.views ?? {}),
       records,
       nextRecordId: maxId + 1,
     });
@@ -76,6 +110,21 @@ export class MockApiError extends Error {
   ) {
     super(message);
   }
+}
+
+export function appInfo(app: StoredApp) {
+  return {
+    appId: app.id,
+    code: app.code,
+    name: app.name,
+    description: app.description,
+    spaceId: app.spaceId,
+    threadId: app.threadId,
+    createdAt: app.createdAt,
+    creator: structuredClone(app.creator),
+    modifiedAt: app.modifiedAt,
+    modifier: structuredClone(app.modifier),
+  };
 }
 
 export function responseRecord(record: StoredRecord): KintoneRecord {
