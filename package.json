@@ -1,0 +1,39 @@
+{
+  "name": "kintone-mock-server",
+  "version": "0.1.0",
+  "description": "Lightweight mock server for the kintone REST API",
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
+  },
+  "bin": {
+    "kintone-mock-server": "./dist/src/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "oxlint .",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "test": "pnpm build && node --test dist/test/*.test.js",
+    "check": "pnpm lint && pnpm test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@10.15.0",
+  "devDependencies": {
+    "@types/node": "26.1.1",
+    "oxfmt": "0.61.0",
+    "oxlint": "1.76.0",
+    "typescript": "7.0.2"
+  }
+}
