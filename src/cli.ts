@@ -38,27 +38,29 @@ async function serve(fixture: MockFixture): Promise<void> {
 
 function read(fixture: MockFixture, subcommand: string): void {
   const store = new MockStore(fixture);
-  const app = required("--app");
   let path: string;
   let params: Record<string, unknown>;
 
   if (subcommand === "record") {
     path = "/k/v1/record.json";
-    params = { app, ...(argument("--id") ? { id: argument("--id") } : {}) };
+    params = { app: required("--app"), id: required("--id") };
   } else if (subcommand === "records") {
     path = "/k/v1/records.json";
     params = {
-      app,
+      app: required("--app"),
       ...(argument("--query") ? { query: argument("--query") } : {}),
       ...(argument("--fields") ? { fields: argument("--fields")?.split(",").filter(Boolean) } : {}),
       ...(has("--total-count") ? { totalCount: true } : {}),
     };
   } else if (subcommand === "fields") {
     path = has("--preview") ? "/k/v1/preview/app/form/fields.json" : "/k/v1/app/form/fields.json";
-    params = { app };
+    params = { app: required("--app") };
   } else if (subcommand === "get") {
     path = required("--path");
-    params = { app, ...jsonArgument("--params") };
+    params = {
+      ...jsonArgument("--params"),
+      ...(argument("--app") ? { app: argument("--app") } : {}),
+    };
   } else {
     throw new Error(`Unknown command: ${subcommand}`);
   }
