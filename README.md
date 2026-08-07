@@ -60,14 +60,52 @@ Create a fixture:
 }
 ```
 
-Then start the server:
+### Read-only mode
+
+Read-only commands do not listen on a port. They load the fixture, execute the equivalent kintone GET API in-process, print JSON to stdout, and exit.
 
 ```sh
-pnpm build
+# GET /k/v1/record.json?app=1&id=1
+node dist/src/cli.js record --fixture ./fixture.json --app 1 --id 1
+
+# GET /k/v1/records.json
+node dist/src/cli.js records \
+  --fixture ./fixture.json \
+  --app 1 \
+  --query 'order by name asc limit 20' \
+  --fields name \
+  --total-count
+
+# GET /k/v1/app/form/fields.json?app=1
+node dist/src/cli.js fields --fixture ./fixture.json --app 1
+
+# Preview fields
+node dist/src/cli.js fields --fixture ./fixture.json --app 1 --preview
+
+# Raw GET for supported endpoints
+node dist/src/cli.js get \
+  --fixture ./fixture.json \
+  --path /k/v1/records.json \
+  --params '{"app":1,"query":"limit 10"}'
+```
+
+Add `--pretty` to pretty-print JSON. The CLI read mode is intentionally GET-only; record and field mutations remain available only through the mock server/programmatic API.
+
+### HTTP server mode
+
+The existing server mode remains available when a development environment can open a local port:
+
+```sh
+node dist/src/cli.js serve --fixture ./fixture.json --port 3000
+```
+
+For compatibility, omitting `serve` also starts the server:
+
+```sh
 node dist/src/cli.js --fixture ./fixture.json --port 3000
 ```
 
-The base URL is `http://127.0.0.1:3000` by default, so an HTTP client can call the normal kintone paths below that base URL.
+The base URL is `http://127.0.0.1:3000` by default.
 
 ## Programmatic use
 
